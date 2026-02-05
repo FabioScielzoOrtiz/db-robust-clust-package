@@ -18,6 +18,6 @@ setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
-    install_requires=['polars','numpy<=1.26.4', 'PyDistances', 'pandas', 'scikit-learn-extra', 'tqdm', 'setuptools', 'pyarrow', 'matplotlib', 'seaborn'],
+    install_requires=['polars','numpy<=1.26.4', 'robust-mixed-dist', 'pandas', 'scikit-learn-extra', 'tqdm', 'setuptools', 'pyarrow', 'matplotlib', 'seaborn'],
     python_requires=">=3.7"
 )

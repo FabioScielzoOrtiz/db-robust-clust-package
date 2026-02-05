@@ -1,5 +1,5 @@
 import numpy as np
-import polars as pl
+#import polars as pl
 #from PyMachineLearning.preprocessing import Encoder, Imputer
 #from sklearn.pipeline import Pipeline
 #from sklearn.compose import ColumnTransformer

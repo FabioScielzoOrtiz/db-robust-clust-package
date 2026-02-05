@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 from sklearn_extra.cluster import KMedoids
 from sklearn.model_selection import KFold
-from PyDistances.mixed import FastGGowerDistMatrix, GGowerDist
+from robust_mixed_dist.mixed import FastGGowerDistMatrix, GGowerDist
 from tqdm import tqdm
 
 #####################################################################################################################
