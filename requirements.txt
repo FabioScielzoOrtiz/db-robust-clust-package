@@ -7,6 +7,6 @@ scikit-learn-extra
 matplotlib
 seaborn
 setuptools 
-robust-mixed-dist==0.1.17
+robust-mixed-dist==0.1.19
 tqdm
 kmedoids

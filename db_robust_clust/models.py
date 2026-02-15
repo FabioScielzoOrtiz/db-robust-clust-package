@@ -1,15 +1,10 @@
 #####################################################################################################################
 
-import polars as pl
-import pandas as pd
 import numpy as np
-from dataclasses import dataclass
 from typing import Any, Optional, Tuple, List, Union
 from sklearn.base import BaseEstimator, ClusterMixin, clone
 from sklearn.utils.validation import check_array, check_is_fitted
-from sklearn.model_selection import train_test_split
-from sklearn_extra.cluster import KMedoids, CLARA
-from kmedoids import KMedoidsResult
+from sklearn.model_selection import train_test_split, KFold
 
 from robust_mixed_dist.quantitative import (
     euclidean_dist, 
@@ -133,167 +128,73 @@ def get_covariance_matrix(
 # 3. ESTIMATOR CLASS (Scikit-Learn API Compatible)
 #####################################################################################################################
 
-def compute_dist_matrix(
-        X, 
-        metric, 
-        p1=None, 
-        p2=None, 
-        p3=None, 
-        d1=None, 
-        d2=None, 
-        d3=None,
-        q=None, 
-        robust_method=None, 
-        alpha=None, 
-        weights=None,
-):
-
-    dist_matrix_objects = DIST_MATRIX_FUNCS
-    
-    try:
-
-        if metric == 'minkowski':
-            D = dist_matrix_objects[metric](X, q)
-        elif metric == 'robust_mahalanobis':
-            S_robust_est = S_robust(X, method=robust_method, alpha=alpha, weights=weights)
-            D = dist_matrix_objects[metric](X, S_robust_est)
-        elif metric == 'ggower':
-            D, D1, D2, D3 = dist_matrix_objects[metric](
-                X, 
-                p1, p2, p3,
-                d1, d2, d3, 
-                q=q, robust_method=robust_method, alpha=alpha, weights=weights,
-                return_combined_distances = True
-            )
-        elif metric == 'relms':
-            D, D1, D2, D3 = dist_matrix_objects[metric](
-                X, 
-                p1, p2, p3,
-                d1, d2, d3, 
-                q=q, robust_method=robust_method, alpha=alpha, weights=weights,
-                return_combined_distances = True
-            )
-        else: 
-            D = dist_matrix_objects[metric](X)
-
-    except Exception as e: 
-        raise e
-    
-    if metric in MIXED_METRICS:
-        return D, D1, D2, D3
-    
-    return D
-
-#####################################################################################################################
-
-def compute_dist(
-        xi, 
-        xr,
-        metric, 
-        p1=None, 
-        p2=None, 
-        p3=None, 
-        d1=None, 
-        d2=None, 
-        d3=None,
-        geom_var_1=None,
-        geom_var_2=None,
-        geom_var_3=None,
-        q=None, 
-        S=None
-    ):
-
-    dist_objects = DIST_FUNCS
-    
-    if metric == 'minkowski':
-        d = dist_objects[metric](xi, xr, q)
-    elif metric == 'mahalanobis':
-        d = dist_objects[metric](xi, xr, S)
-    elif metric == 'robust_mahalanobis':
-        d = dist_objects[metric](xi, xr, S)
-    elif metric in MIXED_METRICS: 
-        d = dist_objects['ggower']( 
-            xi, xr, p1=p1, p2=p2, p3=p3, d1=d1, d2=d2, d3=d3, 
-            q=q, S=S, geom_var_1=geom_var_1, geom_var_2=geom_var_2, geom_var_3=geom_var_3)
-    else: 
-        d = dist_objects[metric](xi, xr)
-
-    return d
-
-#####################################################################################################################
-
-def get_covariance_matrix(X, metric, p1, d1, robust_method=None, alpha=None, weights=None):
-    
-    if metric in ['mahalanobis', 'robust_mahalanobis'] or (metric in MIXED_METRICS and d1 in ['mahalanobis', 'robust_mahalanobis']):
-
-        if p1 != None and p1 > 0:
-            X_quant = X[:, :p1] 
-            
-            if metric == 'robust_mahalanobis' or d1 == 'robust_mahalanobis':
-                S = S_robust(X=X_quant, method=robust_method, alpha=alpha, weights=weights)
-            
-            if metric == 'mahalanobis' or d1 == 'mahalanobis':
-                S = np.cov(X_quant, rowvar=False)
-
-            return S
-
-#####################################################################################################################
-
-def get_medoids_idx_labels(sample_labels, medoid_indices):
-    
-    medoids_idx_labels = {i: sample_labels[i] for i in medoid_indices}
-
-    return medoids_idx_labels
-
-#####################################################################################################################
-
-def get_nearest_medoid_idx(x_new, X, medoid_indices, metric, p1, p2, p3, d1, d2, d3, q, geom_var_1, geom_var_2, geom_var_3, S):
-
-    nearest_medoid_idx = medoid_indices[
-        np.argmin([
-            compute_dist(
-                x_new, X[medoid_idx,:], 
-                metric=metric, p1=p1, p2=p2, p3=p3, 
-                d1=d1, d2=d2, d3=d3, q=q, 
-                geom_var_1=geom_var_1, geom_var_2=geom_var_2, geom_var_3=geom_var_3, S=S
-            ) 
-            for medoid_idx in medoid_indices
-        ])
-    ]
-
-    return nearest_medoid_idx
-
-#####################################################################################################################
-
-def get_out_sample_labels(X_sample, X_out_sample, medoid_indices, medoids_idx_labels, metric, p1, p2, p3, d1, d2, d3, q, geom_var_1, geom_var_2, geom_var_3, S):
-   
-    out_sample_labels = []
-
-
-    for i in range(len(X_out_sample)):
-     
-        nearest_medoid_idx = get_nearest_medoid_idx(X_out_sample[i,:], X_sample, medoid_indices, metric, p1, p2, p3, d1, d2, d3, q, geom_var_1, geom_var_2, geom_var_3, S)
-    
-        out_sample_labels.append(medoids_idx_labels[nearest_medoid_idx])
-    
-    return out_sample_labels
-
-#####################################################################################################################
-
-def get_labels(sample_index, out_sample_index, sample_labels, out_sample_labels):
-
-    data_idx_shuffled = np.concatenate([sample_index, out_sample_index])
-    labels_shuffled = np.concatenate([sample_labels, out_sample_labels])
-    data_idx_shuffled_argsort = np.argsort(data_idx_shuffled)
-    labels = np.array([labels_shuffled[i]   for i in data_idx_shuffled_argsort])
-
-    return labels
-
-#####################################################################################################################
-
 class SampleDistClustering(BaseEstimator, ClusterMixin):
     """
     Clustering based on subsampling and distance metrics.
+
+    -------------------
+    Constructor method
+    -------------------
+
+    Parameters: (inputs)
+    -----------
+
+    clustering_method: the base clustering algorithm instance (e.g., a scikit-learn or kmedoids object) to be fitted on the subsample's distance matrix.
+
+    metric: the global distance metric to be computed. Must be an string (e.g., 'minkowski', 'robust_mahalanobis', or a mixed metric name).
+
+    frac_sample_size: the sample size in proportional terms to be extracted for the initial clustering. Must be a float in (0, 1].
+
+    random_state: the random seed used for extracting the (random) sample elements.
+
+    stratify: whether to use stratified sampling based on the response variable `y`. Must be a boolean.
+
+    p1, p2, p3: number of quantitative, binary and multi-class variables in the considered data matrix, respectively. Must be non-negative integers.
+
+    d1: name of the distance to be computed for quantitative variables.
+
+    d2: name of the distance to be computed for binary variables.
+
+    d3: name of the distance to be computed for multi-class variables.
+
+    q: the parameter that defines the Minkowski distance. Must be a positive integer.
+
+    robust_method: the method to be used for computing the robust covariance matrix. Only needed when metric or d1 = 'robust_mahalanobis'.
+
+    alpha: a real number in [0,1] used by the robust covariance estimation method. Only needed when metric or d1 = 'robust_mahalanobis'.
+
+    -----------
+    Fit method: 
+    -----------
+
+    Fits the subsample-based clustering algorithm to `X`, and `y` (if stratification is required).
+
+    Parameters: (inputs)
+    -----------
+
+    X: a pandas/polars data-frame or a numpy array. Represents a predictors matrix and is required. 
+    If using mixed metrics, the first p1 predictors must be the quantitative, followed by the p2 binary predictors, and finally the p3 multiclass predictors.
+
+    y: a pandas/polars series or a numpy array. Represents a response variable. Only required if `stratify=True`.
+
+    weights: the sample weights. Used internally for robust covariance estimation if metric or d1 = 'robust_mahalanobis'. 
+
+    ---------------
+    Predict method:
+    ---------------
+
+    Predicts clusters for `X` observations by assigning them to their nearest medoid (found during the fit stage) according to the configured metric.
+
+    Parameters: (inputs)
+    -----------
+
+    X: a pandas/polars data-frame or a numpy array. Represents a predictors matrix and is required. 
+    Must follow the same column structure as the `X` passed to the fit method.
+
+    Returns: (outputs)
+    --------
+
+    predicted_labels: a list containing the predicted clusters of each observation of `X`.
     """
     def __init__(
         self,
@@ -310,8 +211,7 @@ class SampleDistClustering(BaseEstimator, ClusterMixin):
         d3: Optional[str] = None,
         q: int = 1,
         robust_method: str = 'trimmed',
-        alpha: float = 0.05,
-        weights: Optional[list] = None
+        alpha: float = 0.05
     ):
         # In scikit-learn, __init__ MUST ONLY assign arguments to self.
         self.clustering_method = clustering_method
@@ -324,7 +224,6 @@ class SampleDistClustering(BaseEstimator, ClusterMixin):
         self.q = q
         self.robust_method = robust_method
         self.alpha = alpha
-        self.weights = weights
 
     def _compute_dist_matrix(self, X: np.ndarray) -> Union[np.ndarray, Tuple]:
             """Computes the distance matrix based on the estimator's configuration."""
@@ -371,7 +270,7 @@ class SampleDistClustering(BaseEstimator, ClusterMixin):
             d = func(xi, xr)
         return d
 
-    def fit(self, X: Union[np.ndarray, Any], y: Optional[Union[np.ndarray, Any]] = None):
+    def fit(self, X: Union[np.ndarray, Any], y: Optional[Union[np.ndarray, Any]] = None, weights: Optional[list] = None):
         """Fits the model to the data."""
         # Safely and uniformly converts Polars/Pandas to Numpy
         X = check_array(X, accept_sparse=False, dtype=None)
@@ -381,6 +280,11 @@ class SampleDistClustering(BaseEstimator, ClusterMixin):
         X_sample, X_out_sample, sample_idx, out_sample_idx = extract_sample(
             X, y, self.frac_sample_size, self.random_state, self.stratify
         )
+        
+        self.weights = weights
+
+        if weights is not None:
+            self.weights = weights[sample_idx] 
 
         # 1. Distance computation
         dist_output = self._compute_dist_matrix(X_sample)
@@ -455,6 +359,76 @@ class FoldSampleDistClustering(BaseEstimator, ClusterMixin):
     1. Splits data into K folds and finds local medoids for each partition.
     2. Pools all local medoids and clusters them again to find the global meta-medoids.
     3. Reconstructs the final labels mapping back to the original points.
+
+    -------------------
+    Constructor method
+    -------------------
+
+    Parameters: (inputs)
+    -----------
+
+    clustering_method: the base clustering algorithm instance (e.g., a scikit-learn or kmedoids object) to be fitted on the distance matrices of each fold and the final meta-clustering stage.
+
+    metric: the global distance metric to be computed. Must be a string (e.g., 'minkowski', 'robust_mahalanobis', or a mixed metric name).
+
+    n_splits: number of folds to be used for partitioning the data. Must be an integer greater than 1.
+
+    shuffle: whether data is shuffled before applying KFold. Must be a boolean.
+
+    random_state: the random seed used for extracting sample elements and, if shuffle=True, for KFold partitioning.
+
+    stratify: whether to use stratified sampling based on the response variable `y` within each fold. Must be a boolean.
+
+    frac_sample_size: the sample size in proportional terms to be extracted within each fold for local clustering. Must be a float in (0, 1].
+
+    meta_frac_sample_size: the sample size in proportional terms to be used during the meta-clustering stage (pooling all local medoids). Must be a float in (0, 1].
+
+    p1, p2, p3: number of quantitative, binary and multi-class variables in the considered data matrix, respectively. Must be non-negative integers.
+
+    d1: name of the distance to be computed for quantitative variables.
+
+    d2: name of the distance to be computed for binary variables.
+
+    d3: name of the distance to be computed for multi-class variables.
+
+    q: the parameter that defines the Minkowski distance. Must be a positive integer.
+
+    robust_method: the method to be used for computing the robust covariance matrix. Only needed when metric or d1 = 'robust_mahalanobis'.
+
+    alpha: a real number in [0,1] used by the robust covariance estimation method. Only needed when metric or d1 = 'robust_mahalanobis'.
+
+    -----------
+    Fit method:
+    -----------
+
+    Fits the 2-stage meta-clustering model to `X` (and `y` if stratification is required).
+
+    Parameters: (inputs)
+    -----------
+
+    X: a pandas/polars data-frame or a numpy array. Represents a predictors matrix and is required. 
+    If using mixed metrics, the first p1 predictors must be the quantitative, followed by the p2 binary predictors, and finally the p3 multiclass predictors.
+
+    y: a pandas/polars series or a numpy array. Represents a response variable. Only required if `stratify=True`.
+
+    weights: the sample weights. Used internally for global robust covariance estimation if metric or d1 = 'robust_mahalanobis'. 
+
+    ---------------
+    Predict method:
+    ---------------
+
+    Predicts clusters for `X` observations by assigning them to their nearest global meta-medoid (found during the second stage of the fit process) according to the configured metric.
+
+    Parameters: (inputs)
+    -----------
+
+    X: a pandas/polars data-frame or a numpy array. Represents a predictors matrix and is required. 
+    Must follow the same column structure as the `X` passed to the fit method.
+
+    Returns: (outputs)
+    --------
+
+    predicted_labels: a list containing the predicted clusters of each observation of `X`.
     """
     def __init__(
         self,
@@ -475,7 +449,6 @@ class FoldSampleDistClustering(BaseEstimator, ClusterMixin):
         q: int = 1,
         robust_method: str = 'trimmed',
         alpha: float = 0.05,
-        weights: Optional[list] = None
     ):
         self.clustering_method = clustering_method
         self.metric = metric
@@ -490,8 +463,7 @@ class FoldSampleDistClustering(BaseEstimator, ClusterMixin):
         self.q = q
         self.robust_method = robust_method
         self.alpha = alpha
-        self.weights = weights
-
+        
     def _compute_dist_matrix(self, X: np.ndarray) -> Union[np.ndarray, Tuple]:
         """Computes the distance matrix based on the estimator's configuration."""
         func = DIST_MATRIX_FUNCS.get(self.metric)
@@ -526,11 +498,12 @@ class FoldSampleDistClustering(BaseEstimator, ClusterMixin):
             )
         return func(xi, xr)
 
-    def fit(self, X: Union[np.ndarray, Any], y: Optional[Union[np.ndarray, Any]] = None):
+    def fit(self, X: Union[np.ndarray, Any], y: Optional[Union[np.ndarray, Any]] = None, weights: Optional[list] = None):
         """Fits the 2-stage meta-clustering model."""
         X = check_array(X, accept_sparse=False, dtype=None)
         
-        # 0. Global Covariance (Calculated once to ensure scale consistency across all folds)
+        # 0. Global Covariance (Calculated once to ensure scale consistency across all folds)  
+        self.weights = weights        
         self.S_estimation_ = get_covariance_matrix(
             X, self.metric, self.p1, self.d1, self.robust_method, self.alpha, self.weights
         )
@@ -553,6 +526,9 @@ class FoldSampleDistClustering(BaseEstimator, ClusterMixin):
                 X_fold, y=y_fold, frac_sample_size=self.frac_sample_size, 
                 random_state=self.random_state + fold_idx, stratify=self.stratify
             )
+
+            if weights is not None:
+                self.weights = weights[sample_idx] 
             
             dist_output = self._compute_dist_matrix(X_sample)
             if self.metric in MIXED_METRICS:
@@ -606,6 +582,9 @@ class FoldSampleDistClustering(BaseEstimator, ClusterMixin):
             X_medoids, y=None, frac_sample_size=self.meta_frac_sample_size, 
             random_state=self.random_state, stratify=False
         )
+
+        if self.weights is not None:
+            self.weights = weights[meta_sample_idx] 
 
         dist_output_meta = self._compute_dist_matrix(X_meta_sample)
         if self.metric in MIXED_METRICS:
@@ -683,6 +662,7 @@ class FoldSampleDistClustering(BaseEstimator, ClusterMixin):
 #####################################################################################################################
 #####################################################################################################################
 
+'''
 import polars as pl
 import pandas as pd
 import numpy as np
@@ -1003,7 +983,9 @@ class FoldFastKmedoidsGGower:
                 predicted_clusters.append(np.argmin(dist_xi_medoids))
 
         return predicted_clusters
-    
+
+'''
+
 #####################################################################################################################
 #####################################################################################################################
 #####################################################################################################################
