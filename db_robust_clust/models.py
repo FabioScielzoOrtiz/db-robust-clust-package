@@ -340,7 +340,6 @@ class SampleDistClustering(BaseEstimator, ClusterMixin):
         for x_new in X:
             # Iterate directly over the saved medoid vectors
             distances = [self._compute_point_dist(x_new, mv) for mv in self.medoid_vectors_]
-            
             # Find the position of the minimum distance (0, 1, 2, ...)
             nearest_idx_in_array = np.argmin(distances)
             
@@ -352,6 +351,140 @@ class SampleDistClustering(BaseEstimator, ClusterMixin):
 
 #####################################################################################################################
 
+class FoldSampleDistClustering(BaseEstimator, ClusterMixin):
+    """
+    K-Fold Meta-Clustering based on subsampling and distance metrics.
+    Implements a two-stage ensemble algorithm relying on SampleDistClustering:
+    1. Splits data into K folds and fits a SampleDistClustering model locally on each.
+    2. Pools all local medoids and fits a global SampleDistClustering model to find meta-medoids.
+    3. Reconstructs the final labels mapping back to the original points.
+    """
+    def __init__(
+        self,
+        clustering_method: Any,
+        metric: str,
+        n_splits: int = 5,
+        shuffle: bool = True,
+        random_state: int = 42,
+        stratify: bool = False,
+        frac_sample_size: float = 0.1,
+        meta_frac_sample_size: float = 0.8, 
+        p1: Optional[int] = None,
+        p2: Optional[int] = None,
+        p3: Optional[int] = None,
+        d1: Optional[str] = None,
+        d2: Optional[str] = None,
+        d3: Optional[str] = None,
+        q: int = 1,
+        robust_method: str = 'trimmed',
+        alpha: float = 0.05,
+    ):
+        self.clustering_method = clustering_method
+        self.metric = metric
+        self.n_splits = n_splits
+        self.shuffle = shuffle
+        self.random_state = random_state
+        self.stratify = stratify
+        self.frac_sample_size = frac_sample_size
+        self.meta_frac_sample_size = meta_frac_sample_size
+        self.p1, self.p2, self.p3 = p1, p2, p3
+        self.d1, self.d2, self.d3 = d1, d2, d3
+        self.q = q
+        self.robust_method = robust_method
+        self.alpha = alpha
+
+    def _build_base_model(self, frac_size: float, random_seed: int, stratify_flag: bool) -> 'SampleDistClustering':
+        """Helper method to instantiate the underlying clustering component."""
+        return SampleDistClustering(
+            clustering_method=clone(self.clustering_method),
+            metric=self.metric,
+            frac_sample_size=frac_size,
+            random_state=random_seed,
+            stratify=stratify_flag,
+            p1=self.p1, p2=self.p2, p3=self.p3,
+            d1=self.d1, d2=self.d2, d3=self.d3,
+            q=self.q, robust_method=self.robust_method, alpha=self.alpha
+        )
+
+    def fit(self, X: Union[np.ndarray, Any], y: Optional[Union[np.ndarray, Any]] = None, weights: Optional[list] = None):
+        """Fits the 2-stage meta-clustering model delegating to SampleDistClustering."""
+        # Convert inputs safely (assuming check_array is imported)
+        # X = check_array(X, accept_sparse=False, dtype=None)
+        
+        kf = KFold(n_splits=self.n_splits, shuffle=self.shuffle, random_state=self.random_state)
+        
+        fold_indices = {}
+        fold_labels_dict = {}
+        all_medoids_list = []
+        medoid_to_fold_cluster_map = [] # To trace back pooled medoids to their origin
+        
+        # ==========================================
+        # STAGE 1: LOCAL CLUSTERING (PER FOLD)
+        # ==========================================
+        for fold_idx, (train_index, test_index) in enumerate(kf.split(X)):
+            fold_indices[fold_idx] = test_index
+            X_fold = X[test_index]
+            y_fold = y[test_index] if y is not None else None
+            w_fold = weights[test_index] if weights is not None else None
+            
+            # Delegate entirely to the base class
+            local_model = self._build_base_model(self.frac_sample_size, self.random_state + fold_idx, self.stratify)
+            local_model.fit(X_fold, y=y_fold, weights=w_fold)
+
+            # Store predictions for the whole fold
+            fold_labels_dict[fold_idx] = local_model.labels_
+            
+            # Pool medoids and track their origin
+            local_medoid_labels = list(local_model.medoids_idx_labels_.values())
+            for idx, m_vec in enumerate(local_model.medoid_vectors_):
+                all_medoids_list.append(m_vec)
+                medoid_to_fold_cluster_map.append((fold_idx, local_medoid_labels[idx]))
+
+        # ==========================================
+        # STAGE 2: META-CLUSTERING (ALL MEDOIDS)
+        # ==========================================
+        X_medoids = np.array(all_medoids_list)
+        
+        # We also delegate Stage 2!
+        self.meta_model_ = self._build_base_model(self.meta_frac_sample_size, self.random_state, stratify_flag=False)
+        self.meta_model_.fit(X_medoids, y=None, weights=None)
+        
+        # Store final vectors to comply with checks
+        self.medoid_vectors_ = self.meta_model_.medoid_vectors_
+        
+        # ==========================================
+        # STAGE 3: LABEL RECONSTRUCTION MAPPING
+        # ==========================================
+        final_labels = np.full(len(X), -1)
+        
+        for meta_idx, meta_label in enumerate(self.meta_model_.labels_):
+            # 1. Identify where this medoid came from
+            fold_idx, local_cluster_lbl = medoid_to_fold_cluster_map[meta_idx]
+            
+            # 2. Find all original points in that fold that belonged to that local cluster
+            mask = (fold_labels_dict[fold_idx] == local_cluster_lbl)
+            original_indices = fold_indices[fold_idx][mask]
+            
+            # 3. Assign them the global meta-label
+            final_labels[original_indices] = meta_label
+                
+        self.labels_ = final_labels
+        return self
+
+    def predict(self, X: Union[np.ndarray, Any]) -> List[int]:
+        """Assigns labels to new data delegating to the meta-model."""
+        # check_is_fitted(self, ['meta_model_'])
+        
+        # Since the meta_model is a SampleDistClustering fitted on the pooled medoids,
+        # its own predict method does exactly what we need for out-of-sample data!
+        return self.meta_model_.predict(X)
+    
+#####################################################################################################################      
+#####################################################################################################################
+#####################################################################################################################
+#####################################################################################################################
+
+'''
 class FoldSampleDistClustering(BaseEstimator, ClusterMixin):
     """
     K-Fold Meta-Clustering based on subsampling and distance metrics.
@@ -656,10 +789,8 @@ class FoldSampleDistClustering(BaseEstimator, ClusterMixin):
             predicted_labels.append(self.meta_medoids_idx_labels_[original_medoid_idx])
 
         return predicted_labels
-    
-#####################################################################################################################      
-#####################################################################################################################
-#####################################################################################################################
+'''
+
 #####################################################################################################################
 
 '''
