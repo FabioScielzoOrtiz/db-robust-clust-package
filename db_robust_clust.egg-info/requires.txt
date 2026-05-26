@@ -1,6 +1,6 @@
 polars
 numpy<=1.26.4
-PyDistances
+robust-mixed-dist
 pandas
 scikit-learn-extra
 tqdm

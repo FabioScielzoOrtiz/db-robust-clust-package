@@ -2,7 +2,6 @@ LICENSE
 README.md
 setup.py
 db_robust_clust/__init__.py
-db_robust_clust/data.py
 db_robust_clust/metrics.py
 db_robust_clust/models.py
 db_robust_clust/plots.py

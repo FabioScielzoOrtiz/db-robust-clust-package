@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: db-robust-clust
-Version: 0.1.5
+Version: 0.1.9
 Summary: Apply distance based robust clustering for mixed data.
 Home-page: https://github.com/FabioScielzoOrtiz/db_robust_clust
 Author: Fabio Scielzo Ortiz
@@ -13,7 +13,7 @@ Description-Content-Type: text/markdown
 License-File: LICENSE
 Requires-Dist: polars
 Requires-Dist: numpy<=1.26.4
-Requires-Dist: PyDistances
+Requires-Dist: robust-mixed-dist
 Requires-Dist: pandas
 Requires-Dist: scikit-learn-extra
 Requires-Dist: tqdm
