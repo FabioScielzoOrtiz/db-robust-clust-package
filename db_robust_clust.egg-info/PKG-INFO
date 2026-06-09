@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: db-robust-clust
-Version: 0.1.10
+Version: 0.1.12
 Summary: Apply distance based robust clustering for mixed data.
 Home-page: https://github.com/FabioScielzoOrtiz/db_robust_clust
 Author: Fabio Scielzo Ortiz

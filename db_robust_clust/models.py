@@ -307,25 +307,25 @@ class SampleDistClustering(BaseEstimator, ClusterMixin):
         if y is not None:
             y = check_array(y, ensure_2d=False, dtype=None)
 
-        X_sample, X_out_sample, sample_idx, out_sample_idx = extract_sample(
+        X_sample, X_out_sample, self.sample_idx, out_sample_idx = extract_sample(
             X, y, self.frac_sample_size, self.random_state, self.stratify
         )
         
         self.weights = weights
 
         if weights is not None:
-            self.weights = weights[sample_idx] 
+            self.weights = weights[self.sample_idx] 
 
         # 1. Distance computation
-        dist_output = self._compute_dist_matrix(X_sample)
+        self.dist_output = self._compute_dist_matrix(X_sample)
         
         if self.metric in MIXED_METRICS:
-            D, D1, D2, D3 = dist_output
+            D, D1, D2, D3 = self.dist_output
             self.geom_var_1_ = geometric_variability(D1**2)
             self.geom_var_2_ = geometric_variability(D2**2)
             self.geom_var_3_ = geometric_variability(D3**2)
         else:
-            D = dist_output
+            D = self.dist_output
             self.geom_var_1_ = self.geom_var_2_ = self.geom_var_3_ = None
 
         # 2. Base clustering fit
@@ -359,7 +359,7 @@ class SampleDistClustering(BaseEstimator, ClusterMixin):
         out_sample_labels = self.predict(X_out_sample) if X_out_sample.shape[0] > 0 else np.array([])
         
         # 8. Reconstruct ordered labels
-        data_idx_shuffled = np.concatenate([sample_idx, out_sample_idx])
+        data_idx_shuffled = np.concatenate([self.sample_idx, out_sample_idx])
         labels_shuffled = np.concatenate([sample_labels, out_sample_labels])
         
         self.labels_ = labels_shuffled[np.argsort(data_idx_shuffled)]
